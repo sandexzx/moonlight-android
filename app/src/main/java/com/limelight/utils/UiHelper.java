@@ -115,6 +115,11 @@ public class UiHelper {
         }
     }
 
+    // Compose handles its own insets; do not pad its content view.
+    public static void notifyNewComposeRootView(Activity activity) {
+        setGameModeStatus(activity, false, false);
+    }
+
     public static void notifyNewRootView(final Activity activity)
     {
         View rootView = activity.findViewById(android.R.id.content);

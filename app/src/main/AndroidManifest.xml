@@ -88,6 +88,7 @@
 
         <activity
             android:name=".PcView"
+            android:theme="@style/HomeTheme"
             android:exported="true"
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"

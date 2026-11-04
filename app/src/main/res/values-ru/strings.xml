@@ -279,4 +279,16 @@
     <string name="analogscroll_none">Нет (оба джойстика перемещают мышь)</string>
     <string name="analogscroll_left">Левый аналоговый джойстик</string>
     <string name="pcview_menu_eol">NVIDIA GameStream обслуживание окончено</string>
+    <!-- Computers screen -->
+    <string name="home_title">Компьютеры</string>
+    <string name="home_tab_settings">Настройки</string>
+    <string name="home_connect">Подключиться</string>
+    <string name="home_resume">Продолжить</string>
+    <string name="home_pair">Создать пару</string>
+    <string name="home_wake">Разбудить ПК</string>
+    <string name="home_apps">Приложения</string>
+    <string name="home_more">Ещё</string>
+    <string name="home_status_paired">В сети · Пара создана</string>
+    <string name="home_status_not_paired">В сети · Пары нет</string>
+    <string name="home_status_session">Сессия запущена</string>
 </resources>
