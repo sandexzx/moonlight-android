@@ -1428,6 +1428,26 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         return (byte) modifierFlags;
     }
 
+    // A key code means a physical key on the host, and what that key types depends on the host's
+    // layout: the comma key is a Cyrillic letter on a Russian one. The soft keyboard already knows
+    // the character it wants, so symbols go as text. Letters, digits and space stay keys, since
+    // text input can be unavailable in some host apps and those keys are the ones games read.
+    private boolean isSoftKeyboardSymbol(KeyEvent event) {
+        InputDevice device = event.getDevice();
+        if (device != null && !device.isVirtual()) {
+            return false;
+        }
+
+        // Shortcuts need the real key
+        if (event.isCtrlPressed() || event.isAltPressed() || event.isMetaPressed()) {
+            return false;
+        }
+
+        // Below space are control characters like Enter and Tab, and dead keys are negative
+        int unicodeChar = event.getUnicodeChar();
+        return unicodeChar > ' ' && unicodeChar != 0x7F && !Character.isLetterOrDigit(unicodeChar);
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         return handleKeyDown(event) || super.onKeyDown(keyCode, event);
@@ -1478,6 +1498,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             // Pass through keyboard input if we're not grabbing
             if (!grabbedInput) {
                 return false;
+            }
+
+            if (isSoftKeyboardSymbol(event)) {
+                conn.sendUtf8Text(""+(char)event.getUnicodeChar());
+                return true;
             }
 
             // We'll send it as a raw key event if we have a key mapping, otherwise we'll send it
@@ -1557,6 +1582,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             // Pass through keyboard input if we're not grabbing
             if (!grabbedInput) {
                 return false;
+            }
+
+            // Sent as text on key down, so the host has no key to release
+            if (isSoftKeyboardSymbol(event)) {
+                return true;
             }
 
             short translated = keyboardTranslator.translate(event.getKeyCode(), event.getDeviceId());
