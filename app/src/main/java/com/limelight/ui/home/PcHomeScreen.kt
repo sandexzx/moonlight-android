@@ -2,7 +2,6 @@ package com.limelight.ui.home
 
 import android.content.Context
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -48,7 +47,6 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -63,63 +61,37 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.shapes.Capsule
 import com.limelight.R
-import com.limelight.ui.components.AppScaffold
+import com.limelight.ui.components.ContentMaxWidth
 import com.limelight.ui.components.Glass
 import com.limelight.ui.components.GlassCard
 import com.limelight.ui.components.GlassIconButton
+import com.limelight.ui.components.GlassScreen
 import com.limelight.ui.components.IconAction
 import com.limelight.ui.components.LargeTitle
 import com.limelight.ui.components.LocalBarBackdrop
 import com.limelight.ui.components.LocalCardBackdrop
-import com.limelight.ui.components.LocalOverlay
 import com.limelight.ui.components.MenuAction
-import com.limelight.ui.components.OverlayHost
 import com.limelight.ui.components.OverlayState
 import com.limelight.ui.components.PrimaryButton
 import com.limelight.ui.components.Spinner
 import com.limelight.ui.components.TextAction
 import com.limelight.ui.components.menuAnchor
 import com.limelight.ui.components.rememberMenuAnchor
-import com.limelight.ui.theme.AppBackground
 import com.limelight.ui.theme.AppStyle
 import com.limelight.ui.theme.AppType
 import com.limelight.ui.theme.Style
 
-private val ContentMaxWidth = 520.dp
-
-/**
- * Root of the computers screen. The whole scaffold is the backdrop of the overlay layer, so
- * menus and alerts refract the screen beneath them.
- */
+/** Root of the computers screen. */
 @Composable
 fun PcHomeApp(state: PcHomeState, actions: PcHomeActions) {
-    val appBackdrop = rememberLayerBackdrop()
-    val ambient by animateColorAsState(
-        targetValue = ambientColor(state.computers.firstOrNull()?.status),
-        animationSpec = tween(700),
-        label = "ambient",
-    )
-
-    CompositionLocalProvider(LocalOverlay provides state.overlay) {
-        Box(Modifier.fillMaxSize()) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .layerBackdrop(appBackdrop),
-            ) {
-                AppScaffold(
-                    background = { AppBackground(it, ambient) },
-                    bottomBar = { HomeTabBar(onOpenSettings = actions::onOpenSettings) },
-                ) { padding ->
-                    PcHomeContent(state, actions, padding)
-                }
-            }
-            OverlayHost(state.overlay, appBackdrop)
-        }
+    GlassScreen(
+        overlay = state.overlay,
+        ambient = ambientColor(state.computers.firstOrNull()?.status),
+        bottomBar = { HomeTabBar(onOpenSettings = actions::onOpenSettings) },
+    ) { padding ->
+        PcHomeContent(state, actions, padding)
     }
 }
 

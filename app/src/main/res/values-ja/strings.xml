@@ -55,7 +55,6 @@
     <string name="applist_menu_quit">セッションを終了する</string>
     <string name="applist_menu_quit_and_start">現在のゲームを終了して新しいゲームを始める</string>
     <string name="applist_menu_cancel">キャンセル</string>
-    <string name="applist_refresh_title">ゲームリスト</string>
     <string name="applist_refresh_msg">ゲームリストを更新中</string>
     <string name="applist_refresh_error_title">エラー</string>
     <string name="applist_refresh_error_msg">ゲームリストの取得に失敗しました</string>

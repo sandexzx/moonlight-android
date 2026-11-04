@@ -57,7 +57,6 @@
     <string name="applist_menu_quit">Sessie afsluiten</string>
     <string name="applist_menu_quit_and_start">Stop Huidige Spel en Start</string>
     <string name="applist_menu_cancel">Annuleren</string>
-    <string name="applist_refresh_title">App-lijst</string>
     <string name="applist_refresh_msg">Apps verversen…</string>
     <string name="applist_refresh_error_title">Fout</string>
     <string name="applist_refresh_error_msg">App lijst ophalen mislukt</string>

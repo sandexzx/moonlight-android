@@ -73,7 +73,6 @@
     <string name="applist_menu_quit">Chiudi sessione</string>
     <string name="applist_menu_quit_and_start">Chiudi sessione corrente e avvia</string>
     <string name="applist_menu_cancel">Annulla</string>
-    <string name="applist_refresh_title">Lista applicazioni</string>
     <string name="applist_refresh_msg">Aggiornamento lista in corso…</string>
     <string name="applist_refresh_error_title">Errore</string>
     <string name="applist_refresh_error_msg">Ricezione lista applicazioni fallita</string>

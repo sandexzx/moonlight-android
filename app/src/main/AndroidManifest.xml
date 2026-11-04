@@ -119,6 +119,7 @@
         </activity>
         <activity
             android:name=".AppView"
+            android:theme="@style/HomeTheme"
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection">

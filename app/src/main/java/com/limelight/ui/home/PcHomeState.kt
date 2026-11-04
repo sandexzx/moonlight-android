@@ -1,21 +1,17 @@
 package com.limelight.ui.home
 
 import androidx.activity.ComponentActivity
-import androidx.activity.SystemBarStyle
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import android.graphics.Color
 import com.limelight.nvstream.http.ComputerDetails
 import com.limelight.nvstream.http.PairingManager
 import com.limelight.ui.components.AlertRequest
 import com.limelight.ui.components.OverlayState
-import com.limelight.ui.theme.MoonlightTheme
+import com.limelight.ui.theme.setGlassContent
 
 /** What a PC card shows and offers. */
 enum class PcStatus { Checking, Offline, NotPaired, Ready, Session }
@@ -152,14 +148,6 @@ private fun ComputerDetails.toCard() = PcCardModel(
 object PcHomeHost {
     @JvmStatic
     fun attach(activity: ComponentActivity, state: PcHomeState, actions: PcHomeActions) {
-        activity.enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
-        )
-        activity.setContent {
-            MoonlightTheme {
-                PcHomeApp(state, actions)
-            }
-        }
+        activity.setGlassContent { PcHomeApp(state, actions) }
     }
 }

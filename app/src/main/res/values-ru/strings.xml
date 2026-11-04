@@ -65,7 +65,6 @@
     <string name="applist_menu_quit_and_start">Выйти из текущей игры и запустить</string>
     <string name="applist_menu_cancel">Отмена</string>
     <string name="applist_menu_tv_channel">Добавить в канал</string>
-    <string name="applist_refresh_title">Список приложений</string>
     <string name="applist_refresh_msg">Обновление приложений…</string>
     <string name="applist_refresh_error_title">Ошибка</string>
     <string name="applist_refresh_error_msg">Ошибка при получении списка приложений</string>
@@ -291,4 +290,9 @@
     <string name="home_status_paired">В сети · Пара создана</string>
     <string name="home_status_not_paired">В сети · Пары нет</string>
     <string name="home_status_session">Сессия запущена</string>
+
+    <!-- App list screen -->
+    <string name="apps_back">Назад</string>
+    <string name="apps_hidden">Скрыто</string>
+    <string name="apps_empty">Приложений пока нет. Добавьте их в веб-интерфейсе Sunshine.</string>
 </resources>

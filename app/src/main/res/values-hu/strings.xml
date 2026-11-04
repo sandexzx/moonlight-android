@@ -92,7 +92,6 @@
     <string name="applist_refresh_error_msg">Nem sikerült lekérni az alkalmazások listáját</string>
     <string name="applist_refresh_error_title">Hiba</string>
     <string name="applist_refresh_msg">Alkalmazáslista frissítése…</string>
-    <string name="applist_refresh_title">Alkalmazáslista</string>
     <string name="applist_menu_quit">Kilépés a munkamenetből</string>
     <string name="applist_menu_resume">Munkamenet folytatása</string>
     <string name="applist_menu_hide_app">Alkalmazás elrejtése</string>

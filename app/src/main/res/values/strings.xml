@@ -124,7 +124,6 @@
     <string name="applist_menu_scut">Create Shortcut</string>
     <string name="applist_menu_tv_channel">Add to Channel</string>
     <string name="applist_menu_hide_app">Hide App</string>
-    <string name="applist_refresh_title">App List</string>
     <string name="applist_refresh_msg">Refreshing apps…</string>
     <string name="applist_refresh_error_title">Error</string>
     <string name="applist_refresh_error_msg">Failed to get app list</string>
@@ -315,4 +314,9 @@
     <string name="home_status_paired">Online · Paired</string>
     <string name="home_status_not_paired">Online · Not paired</string>
     <string name="home_status_session">Session running</string>
+
+    <!-- App list screen -->
+    <string name="apps_back">Back</string>
+    <string name="apps_hidden">Hidden</string>
+    <string name="apps_empty">No apps here yet. Add some in the Sunshine web UI.</string>
 </resources>

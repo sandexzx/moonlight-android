@@ -101,7 +101,6 @@
     <string name="applist_menu_details">Voir les détails</string>
     <string name="applist_menu_scut">Créer un raccourci</string>
     <string name="applist_menu_tv_channel">Ajouter à la liste de chaînes</string>
-    <string name="applist_refresh_title">Liste des applications</string>
     <string name="applist_refresh_msg">Actualisation des applications…</string>
     <string name="applist_refresh_error_title">Erreur</string>
     <string name="applist_refresh_error_msg">Impossible d\'obtenir la liste des applications</string>

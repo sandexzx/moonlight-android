@@ -1,381 +1,236 @@
 package com.limelight;
 
-import java.io.IOException;
-import java.io.StringReader;
-import java.util.HashSet;
-import java.util.List;
-
-import com.limelight.computers.ComputerManagerListener;
-import com.limelight.computers.ComputerManagerService;
-import com.limelight.grid.AppGridAdapter;
-import com.limelight.nvstream.http.ComputerDetails;
-import com.limelight.nvstream.http.NvApp;
-import com.limelight.nvstream.http.NvHTTP;
-import com.limelight.nvstream.http.PairingManager;
-import com.limelight.preferences.PreferenceConfiguration;
-import com.limelight.ui.AdapterFragment;
-import com.limelight.ui.AdapterFragmentCallbacks;
-import com.limelight.utils.CacheHelper;
-import com.limelight.utils.Dialog;
-import com.limelight.utils.ServerHelper;
-import com.limelight.utils.ShortcutHelper;
-import com.limelight.utils.SpinnerDialog;
-import com.limelight.utils.UiHelper;
-
-import android.app.Activity;
 import android.app.Service;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
-import android.content.res.Configuration;
-import android.graphics.Bitmap;
-import android.graphics.drawable.BitmapDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
-import android.view.ContextMenu;
-import android.view.Menu;
-import android.view.MenuItem;
-import android.view.View;
-import android.view.ContextMenu.ContextMenuInfo;
-import android.widget.AbsListView;
-import android.widget.AdapterView;
-import android.widget.AdapterView.OnItemClickListener;
-import android.widget.ImageView;
-import android.widget.TextView;
 import android.widget.Toast;
-import android.widget.AdapterView.AdapterContextMenuInfo;
+
+import androidx.activity.ComponentActivity;
+
+import com.limelight.computers.ComputerManagerListener;
+import com.limelight.computers.ComputerManagerService;
+import com.limelight.grid.assets.CachedAppAssetLoader;
+import com.limelight.grid.assets.DiskAssetLoader;
+import com.limelight.grid.assets.MemoryAssetLoader;
+import com.limelight.grid.assets.NetworkAssetLoader;
+import com.limelight.nvstream.http.ComputerDetails;
+import com.limelight.nvstream.http.NvApp;
+import com.limelight.nvstream.http.NvHTTP;
+import com.limelight.nvstream.http.PairingManager;
+import com.limelight.ui.apps.AppItem;
+import com.limelight.ui.apps.AppListActions;
+import com.limelight.ui.apps.AppListHost;
+import com.limelight.ui.apps.AppListState;
+import com.limelight.utils.CacheHelper;
+import com.limelight.utils.Dialog;
+import com.limelight.utils.ServerHelper;
+import com.limelight.utils.ShortcutHelper;
+import com.limelight.utils.UiHelper;
 
 import org.xmlpull.v1.XmlPullParserException;
 
-public class AppView extends Activity implements AdapterFragmentCallbacks {
-    private AppGridAdapter appGridAdapter;
+import java.io.IOException;
+import java.io.StringReader;
+import java.util.HashSet;
+import java.util.List;
+
+public class AppView extends ComponentActivity implements AppListActions {
+    public static final String HIDDEN_APPS_PREF_FILENAME = "HiddenApps";
+    public static final String NAME_EXTRA = "Name";
+    public static final String UUID_EXTRA = "UUID";
+    public static final String NEW_PAIR_EXTRA = "NewPair";
+    public static final String SHOW_HIDDEN_APPS_EXTRA = "ShowHiddenApps";
+
     private String uuidString;
     private ShortcutHelper shortcutHelper;
-
     private ComputerDetails computer;
     private ComputerManagerService.ApplistPoller poller;
-    private SpinnerDialog blockingLoadSpinner;
+    private ComputerManagerService.ComputerManagerBinder managerBinder;
+    private CachedAppAssetLoader assetLoader;
+    private AppListState state;
     private String lastRawApplist;
     private int lastRunningAppId;
-    private boolean suspendGridUpdates;
+    private volatile boolean suspendGridUpdates;
     private boolean inForeground;
-    private boolean showHiddenApps;
-    private HashSet<Integer> hiddenAppIds = new HashSet<>();
+    private boolean serviceBound;
+    private final HashSet<Integer> hiddenAppIds = new HashSet<>();
 
-    private final static int START_OR_RESUME_ID = 1;
-    private final static int QUIT_ID = 2;
-    private final static int START_WITH_QUIT = 4;
-    private final static int VIEW_DETAILS_ID = 5;
-    private final static int CREATE_SHORTCUT_ID = 6;
-    private final static int HIDE_APP_ID = 7;
-
-    public final static String HIDDEN_APPS_PREF_FILENAME = "HiddenApps";
-
-    public final static String NAME_EXTRA = "Name";
-    public final static String UUID_EXTRA = "UUID";
-    public final static String NEW_PAIR_EXTRA = "NewPair";
-    public final static String SHOW_HIDDEN_APPS_EXTRA = "ShowHiddenApps";
-
-    private ComputerManagerService.ComputerManagerBinder managerBinder;
     private final ServiceConnection serviceConnection = new ServiceConnection() {
-        public void onServiceConnected(ComponentName className, IBinder binder) {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder binder) {
             final ComputerManagerService.ComputerManagerBinder localBinder =
-                    ((ComputerManagerService.ComputerManagerBinder)binder);
-
-            // Wait in a separate thread to avoid stalling the UI
-            new Thread() {
-                @Override
-                public void run() {
-                    // Wait for the binder to be ready
-                    localBinder.waitForReady();
-
-                    // Get the computer object
-                    computer = localBinder.getComputer(uuidString);
-                    if (computer == null) {
+                    (ComputerManagerService.ComputerManagerBinder) binder;
+            new Thread(() -> {
+                localBinder.waitForReady();
+                final ComputerDetails foundComputer = localBinder.getComputer(uuidString);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    if (foundComputer == null) {
                         finish();
                         return;
                     }
-
-                    // Add a launcher shortcut for this PC (forced, since this is user interaction)
-                    shortcutHelper.createAppViewShortcut(computer, true, getIntent().getBooleanExtra(NEW_PAIR_EXTRA, false));
+                    computer = foundComputer;
+                    shortcutHelper.createAppViewShortcut(computer, true,
+                            getIntent().getBooleanExtra(NEW_PAIR_EXTRA, false));
                     shortcutHelper.reportComputerShortcutUsed(computer);
-
-                    try {
-                        appGridAdapter = new AppGridAdapter(AppView.this,
-                                PreferenceConfiguration.readPreferences(AppView.this),
-                                computer, localBinder.getUniqueId(),
-                                showHiddenApps);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                        finish();
-                        return;
-                    }
-
-                    appGridAdapter.updateHiddenApps(hiddenAppIds, true);
-
-                    // Now make the binder visible. We must do this after appGridAdapter
-                    // is set to prevent us from reaching updateUiWithServerinfo() and
-                    // touching the appGridAdapter prior to initialization.
+                    double divisor = Math.max(1.0, 300 / (72 *
+                            (getResources().getDisplayMetrics().densityDpi / 160.0)));
+                    assetLoader = new CachedAppAssetLoader(computer, divisor,
+                            new NetworkAssetLoader(AppView.this, localBinder.getUniqueId()),
+                            new MemoryAssetLoader(), new DiskAssetLoader(AppView.this));
                     managerBinder = localBinder;
-
-                    // Load the app grid with cached data (if possible).
-                    // This must be done _before_ startComputerUpdates()
-                    // so the initial serverinfo response can update the running
-                    // icon.
-                    populateAppGridWithCache();
-
-                    // Start updates
-                    startComputerUpdates();
-
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (isFinishing() || isChangingConfigurations()) {
-                                return;
-                            }
-
-                            // Despite my best efforts to catch all conditions that could
-                            // cause the activity to be destroyed when we try to commit
-                            // I haven't been able to, so we have this try-catch block.
-                            try {
-                                getFragmentManager().beginTransaction()
-                                        .replace(R.id.appFragmentContainer, new AdapterFragment())
-                                        .commitAllowingStateLoss();
-                            } catch (IllegalStateException e) {
-                                e.printStackTrace();
-                            }
-                        }
-                    });
-                }
-            }.start();
+                    // Read the cache off the main thread, before starting polling.
+                    new Thread(() -> {
+                        populateAppGridWithCache();
+                        runOnUiThread(() -> {
+                            if (!isFinishing() && !isDestroyed()) startComputerUpdates();
+                        });
+                    }).start();
+                });
+            }).start();
         }
 
-        public void onServiceDisconnected(ComponentName className) {
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
             managerBinder = null;
         }
     };
 
     @Override
-    public void onConfigurationChanged(Configuration newConfig) {
-        super.onConfigurationChanged(newConfig);
-
-        // If appGridAdapter is initialized, let it know about the configuration change.
-        // If not, it will pick it up when it initializes.
-        if (appGridAdapter != null) {
-            // Update the app grid adapter to create grid items with the correct layout
-            appGridAdapter.updateLayoutWithPreferences(this, PreferenceConfiguration.readPreferences(this));
-
-            try {
-                // Reinflate the app grid itself to pick up the layout change
-                getFragmentManager().beginTransaction()
-                        .replace(R.id.appFragmentContainer, new AdapterFragment())
-                        .commitAllowingStateLoss();
-            } catch (IllegalStateException e) {
-                e.printStackTrace();
-            }
-        }
-    }
-
-    private void startComputerUpdates() {
-        // Don't start polling if we're not bound or in the foreground
-        if (managerBinder == null || !inForeground) {
-            return;
-        }
-
-        managerBinder.startPolling(new ComputerManagerListener() {
-            @Override
-            public void notifyComputerUpdated(final ComputerDetails details) {
-                // Do nothing if updates are suspended
-                if (suspendGridUpdates) {
-                    return;
-                }
-
-                // Don't care about other computers
-                if (!details.uuid.equalsIgnoreCase(uuidString)) {
-                    return;
-                }
-
-                if (details.state == ComputerDetails.State.OFFLINE) {
-                    // The PC is unreachable now
-                    AppView.this.runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            // Display a toast to the user and quit the activity
-                            Toast.makeText(AppView.this, getResources().getText(R.string.lost_connection), Toast.LENGTH_SHORT).show();
-                            finish();
-                        }
-                    });
-
-                    return;
-                }
-
-                // Close immediately if the PC is no longer paired
-                if (details.state == ComputerDetails.State.ONLINE && details.pairState != PairingManager.PairState.PAIRED) {
-                    AppView.this.runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            // Disable shortcuts referencing this PC for now
-                            shortcutHelper.disableComputerShortcut(details,
-                                    getResources().getString(R.string.scut_not_paired));
-
-                            // Display a toast to the user and quit the activity
-                            Toast.makeText(AppView.this, getResources().getText(R.string.scut_not_paired), Toast.LENGTH_SHORT).show();
-                            finish();
-                        }
-                    });
-
-                    return;
-                }
-
-                // App list is the same or empty
-                if (details.rawAppList == null || details.rawAppList.equals(lastRawApplist)) {
-
-                    // Let's check if the running app ID changed
-                    if (details.runningGameId != lastRunningAppId) {
-                        // Update the currently running game using the app ID
-                        lastRunningAppId = details.runningGameId;
-                        updateUiWithServerinfo(details);
-                    }
-
-                    return;
-                }
-
-                lastRunningAppId = details.runningGameId;
-                lastRawApplist = details.rawAppList;
-
-                try {
-                    updateUiWithAppList(NvHTTP.getAppListByReader(new StringReader(details.rawAppList)));
-                    updateUiWithServerinfo(details);
-
-                    if (blockingLoadSpinner != null) {
-                        blockingLoadSpinner.dismiss();
-                        blockingLoadSpinner = null;
-                    }
-                } catch (XmlPullParserException | IOException e) {
-                    e.printStackTrace();
-                }
-            }
-        });
-
-        if (poller == null) {
-            poller = managerBinder.createAppListPoller(computer);
-        }
-        poller.start();
-    }
-
-    private void stopComputerUpdates() {
-        if (poller != null) {
-            poller.stop();
-        }
-
-        if (managerBinder != null) {
-            managerBinder.stopPolling();
-        }
-
-        if (appGridAdapter != null) {
-            appGridAdapter.cancelQueuedOperations();
-        }
-    }
-
-    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        // Assume we're in the foreground when created to avoid a race
-        // between binding to CMS and onResume()
         inForeground = true;
-
         shortcutHelper = new ShortcutHelper(this);
-
         UiHelper.setLocale(this);
-
-        setContentView(R.layout.activity_app_view);
-
-        // Allow floating expanded PiP overlays while browsing apps
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             setShouldDockBigOverlays(false);
         }
-
-        UiHelper.notifyNewRootView(this);
-
-        showHiddenApps = getIntent().getBooleanExtra(SHOW_HIDDEN_APPS_EXTRA, false);
+        UiHelper.notifyNewComposeRootView(this);
+        boolean showHiddenApps = getIntent().getBooleanExtra(SHOW_HIDDEN_APPS_EXTRA, false);
         uuidString = getIntent().getStringExtra(UUID_EXTRA);
-
-        SharedPreferences hiddenAppsPrefs = getSharedPreferences(HIDDEN_APPS_PREF_FILENAME, MODE_PRIVATE);
-        for (String hiddenAppIdStr : hiddenAppsPrefs.getStringSet(uuidString, new HashSet<String>())) {
-            hiddenAppIds.add(Integer.parseInt(hiddenAppIdStr));
+        SharedPreferences prefs = getSharedPreferences(HIDDEN_APPS_PREF_FILENAME, MODE_PRIVATE);
+        for (String id : prefs.getStringSet(uuidString, new HashSet<String>())) {
+            hiddenAppIds.add(Integer.parseInt(id));
         }
-
         String computerName = getIntent().getStringExtra(NAME_EXTRA);
-
-        TextView label = findViewById(R.id.appListText);
         setTitle(computerName);
-        label.setText(computerName);
-
-        // Bind to the computer manager service
-        bindService(new Intent(this, ComputerManagerService.class), serviceConnection,
-                Service.BIND_AUTO_CREATE);
-    }
-
-    private void updateHiddenApps(boolean hideImmediately) {
-        HashSet<String> hiddenAppIdStringSet = new HashSet<>();
-
-        for (Integer hiddenAppId : hiddenAppIds) {
-            hiddenAppIdStringSet.add(hiddenAppId.toString());
-        }
-
-        getSharedPreferences(HIDDEN_APPS_PREF_FILENAME, MODE_PRIVATE)
-                .edit()
-                .putStringSet(uuidString, hiddenAppIdStringSet)
-                .apply();
-
-        appGridAdapter.updateHiddenApps(hiddenAppIds, hideImmediately);
+        state = new AppListState(computerName, showHiddenApps, hiddenAppIds);
+        AppListHost.attach(this, state, this);
+        serviceBound = bindService(new Intent(this, ComputerManagerService.class),
+                serviceConnection, Service.BIND_AUTO_CREATE);
     }
 
     private void populateAppGridWithCache() {
         try {
-            // Try to load from cache
-            lastRawApplist = CacheHelper.readInputStreamToString(CacheHelper.openCacheFileForInput(getCacheDir(), "applist", uuidString));
-            List<NvApp> applist = NvHTTP.getAppListByReader(new StringReader(lastRawApplist));
-            updateUiWithAppList(applist);
+            lastRawApplist = CacheHelper.readInputStreamToString(
+                    CacheHelper.openCacheFileForInput(getCacheDir(), "applist", uuidString));
+            updateUiWithAppList(NvHTTP.getAppListByReader(new StringReader(lastRawApplist)));
             LimeLog.info("Loaded applist from cache");
         } catch (IOException | XmlPullParserException e) {
             if (lastRawApplist != null) {
-                LimeLog.warning("Saved applist corrupted: "+lastRawApplist);
+                LimeLog.warning("Saved applist corrupted: " + lastRawApplist);
+                lastRawApplist = null;
                 e.printStackTrace();
             }
             LimeLog.info("Loading applist from the network");
-            // We'll need to load from the network
-            loadAppsBlocking();
         }
     }
 
-    private void loadAppsBlocking() {
-        blockingLoadSpinner = SpinnerDialog.displayDialog(this, getResources().getString(R.string.applist_refresh_title),
-                getResources().getString(R.string.applist_refresh_msg), true);
+    private void startComputerUpdates() {
+        if (managerBinder == null || assetLoader == null || !inForeground) return;
+        managerBinder.startPolling(new ComputerManagerListener() {
+            @Override
+            public void notifyComputerUpdated(ComputerDetails details) {
+                if (suspendGridUpdates || !details.uuid.equalsIgnoreCase(uuidString)) return;
+                runOnUiThread(() -> {
+                    if (!inForeground || isFinishing() || isDestroyed() || suspendGridUpdates) return;
+                    if (details.state == ComputerDetails.State.OFFLINE) {
+                        Toast.makeText(AppView.this, R.string.lost_connection, Toast.LENGTH_SHORT).show();
+                        finish();
+                        return;
+                    }
+                    if (details.state == ComputerDetails.State.ONLINE &&
+                            details.pairState != PairingManager.PairState.PAIRED) {
+                        shortcutHelper.disableComputerShortcut(details, getString(R.string.scut_not_paired));
+                        Toast.makeText(AppView.this, R.string.scut_not_paired, Toast.LENGTH_SHORT).show();
+                        finish();
+                        return;
+                    }
+                    if (details.rawAppList != null && !details.rawAppList.equals(lastRawApplist)) {
+                        try {
+                            List<NvApp> apps = NvHTTP.getAppListByReader(new StringReader(details.rawAppList));
+                            lastRawApplist = details.rawAppList;
+                            updateUiWithAppList(apps);
+                        } catch (IOException | XmlPullParserException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                    if (details.runningGameId != lastRunningAppId) {
+                        lastRunningAppId = details.runningGameId;
+                        updateUiWithServerinfo(details);
+                    }
+                });
+            }
+        });
+        if (poller == null) poller = managerBinder.createAppListPoller(computer);
+        poller.start();
+        for (AppItem item : state.getApps()) {
+            if (state.art(item.getId()) == null) loadArt(state.app(item.getId()));
+        }
     }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-
-        SpinnerDialog.closeDialogs(this);
-        Dialog.closeDialogs();
-
-        if (managerBinder != null) {
-            unbindService(serviceConnection);
+    private void stopComputerUpdates() {
+        if (poller != null) poller.stop();
+        if (managerBinder != null) managerBinder.stopPolling();
+        if (assetLoader != null) {
+            assetLoader.cancelForegroundLoads();
+            assetLoader.cancelBackgroundLoads();
+            assetLoader.freeCacheMemory();
         }
+    }
+
+    private void updateUiWithServerinfo(ComputerDetails details) {
+        runOnUiThread(() -> state.updateRunning(details.runningGameId));
+    }
+
+    private void updateUiWithAppList(List<NvApp> apps) {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            HashSet<Integer> incoming = new HashSet<>();
+            for (NvApp app : apps) {
+                incoming.add(app.getAppId());
+                if (state.app(app.getAppId()) == null) shortcutHelper.enableAppShortcut(computer, app);
+            }
+            for (AppItem old : state.getApps()) {
+                if (!incoming.contains(old.getId())) {
+                    shortcutHelper.disableAppShortcut(computer, state.app(old.getId()), "App removed from PC");
+                }
+            }
+            state.updateApps(apps);
+            if (inForeground) {
+                for (NvApp app : apps) {
+                    assetLoader.queueCacheLoad(app);
+                    loadArt(app);
+                }
+            }
+        });
+    }
+
+    private void loadArt(NvApp app) {
+        assetLoader.loadArt(app, art -> {
+            if (art != null) state.updateArt(app.getAppId(), art);
+        });
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-
-        // Display a decoder crash notification if we've returned after a crash
         UiHelper.showDecoderCrashDialog(this);
-
         inForeground = true;
         startComputerUpdates();
     }
@@ -383,283 +238,83 @@ public class AppView extends Activity implements AdapterFragmentCallbacks {
     @Override
     protected void onPause() {
         super.onPause();
-
         inForeground = false;
         stopComputerUpdates();
     }
 
     @Override
-    public void onCreateContextMenu(ContextMenu menu, View v, ContextMenuInfo menuInfo) {
-        super.onCreateContextMenu(menu, v, menuInfo);
-
-        AdapterContextMenuInfo info = (AdapterContextMenuInfo) menuInfo;
-        AppObject selectedApp = (AppObject) appGridAdapter.getItem(info.position);
-
-        menu.setHeaderTitle(selectedApp.app.getAppName());
-
-        if (lastRunningAppId != 0) {
-            if (lastRunningAppId == selectedApp.app.getAppId()) {
-                menu.add(Menu.NONE, START_OR_RESUME_ID, 1, getResources().getString(R.string.applist_menu_resume));
-                menu.add(Menu.NONE, QUIT_ID, 2, getResources().getString(R.string.applist_menu_quit));
-            }
-            else {
-                menu.add(Menu.NONE, START_WITH_QUIT, 1, getResources().getString(R.string.applist_menu_quit_and_start));
-            }
-        }
-
-        // Only show the hide checkbox if this is not the currently running app or it's already hidden
-        if (lastRunningAppId != selectedApp.app.getAppId() || selectedApp.isHidden) {
-            MenuItem hideAppItem = menu.add(Menu.NONE, HIDE_APP_ID, 3, getResources().getString(R.string.applist_menu_hide_app));
-            hideAppItem.setCheckable(true);
-            hideAppItem.setChecked(selectedApp.isHidden);
-        }
-
-        menu.add(Menu.NONE, VIEW_DETAILS_ID, 4, getResources().getString(R.string.applist_menu_details));
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // Only add an option to create shortcut if box art is loaded
-            // and when we're in grid-mode (not list-mode).
-            ImageView appImageView = info.targetView.findViewById(R.id.grid_image);
-            if (appImageView != null) {
-                // We have a grid ImageView, so we must be in grid-mode
-                BitmapDrawable drawable = (BitmapDrawable)appImageView.getDrawable();
-                if (drawable != null && drawable.getBitmap() != null) {
-                    // We have a bitmap loaded too
-                    menu.add(Menu.NONE, CREATE_SHORTCUT_ID, 5, getResources().getString(R.string.applist_menu_scut));
-                }
-            }
-        }
+    protected void onDestroy() {
+        super.onDestroy();
+        Dialog.closeDialogs();
+        if (serviceBound) unbindService(serviceConnection);
     }
 
     @Override
-    public void onContextMenuClosed(Menu menu) {
+    public void onBack() { finish(); }
+
+    @Override
+    public void onStartApp(int appId) {
+        NvApp app = state.app(appId);
+        if (app == null || managerBinder == null) return;
+        ServerHelper.doStart(this, app, computer, managerBinder);
     }
 
     @Override
-    public boolean onContextItemSelected(MenuItem item) {
-        AdapterContextMenuInfo info = (AdapterContextMenuInfo) item.getMenuInfo();
-        final AppObject app = (AppObject) appGridAdapter.getItem(info.position);
-        switch (item.getItemId()) {
-            case START_WITH_QUIT:
-                // Display a confirmation dialog first
-                UiHelper.displayQuitConfirmationDialog(this, new Runnable() {
-                    @Override
-                    public void run() {
-                        ServerHelper.doStart(AppView.this, app.app, computer, managerBinder);
-                    }
-                }, null);
-                return true;
+    public void onResumeApp(int appId) { onStartApp(appId); }
 
-            case START_OR_RESUME_ID:
-                // Resume is the same as start for us
-                ServerHelper.doStart(AppView.this, app.app, computer, managerBinder);
-                return true;
-
-            case QUIT_ID:
-                // Display a confirmation dialog first
-                UiHelper.displayQuitConfirmationDialog(this, new Runnable() {
-                    @Override
-                    public void run() {
-                        suspendGridUpdates = true;
-                        ServerHelper.doQuit(AppView.this, computer,
-                                app.app, managerBinder, new Runnable() {
-                            @Override
-                            public void run() {
-                                // Trigger a poll immediately
-                                suspendGridUpdates = false;
-                                if (poller != null) {
-                                    poller.pollNow();
-                                }
-                            }
-                        });
-                    }
-                }, null);
-                return true;
-
-            case VIEW_DETAILS_ID:
-                Dialog.displayDialog(AppView.this, getResources().getString(R.string.title_details), app.app.toString(), false);
-                return true;
-
-            case HIDE_APP_ID:
-                if (item.isChecked()) {
-                    // Transitioning hidden to shown
-                    hiddenAppIds.remove(app.app.getAppId());
-                }
-                else {
-                    // Transitioning shown to hidden
-                    hiddenAppIds.add(app.app.getAppId());
-                }
-                updateHiddenApps(false);
-                return true;
-
-            case CREATE_SHORTCUT_ID:
-                ImageView appImageView = info.targetView.findViewById(R.id.grid_image);
-                Bitmap appBits = ((BitmapDrawable)appImageView.getDrawable()).getBitmap();
-                if (!shortcutHelper.createPinnedGameShortcut(computer, app.app, appBits)) {
-                    Toast.makeText(AppView.this, getResources().getString(R.string.unable_to_pin_shortcut), Toast.LENGTH_LONG).show();
-                }
-                return true;
-
-            default:
-                return super.onContextItemSelected(item);
-        }
+    @Override
+    public void onQuitApp(int appId) {
+        NvApp app = state.app(appId);
+        if (app == null || managerBinder == null) return;
+        state.confirm(getString(R.string.applist_menu_quit), getString(R.string.applist_quit_confirmation),
+                getString(R.string.yes), getString(R.string.no), true, () -> {
+                    if (managerBinder == null) return;
+                    suspendGridUpdates = true;
+                    ServerHelper.doQuit(this, computer, app, managerBinder, () -> {
+                        suspendGridUpdates = false;
+                        if (poller != null) poller.pollNow();
+                    });
+                });
     }
 
-    private void updateUiWithServerinfo(final ComputerDetails details) {
-        AppView.this.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                boolean updated = false;
+    @Override
+    public void onQuitAndStartApp(int appId) {
+        NvApp app = state.app(appId);
+        if (app == null || managerBinder == null) return;
+        state.confirm(getString(R.string.applist_menu_quit), getString(R.string.applist_quit_confirmation),
+                getString(R.string.yes), getString(R.string.no), true, () -> {
+                    if (managerBinder != null) ServerHelper.doStart(this, app, computer, managerBinder);
+                });
+    }
 
-                    // Look through our current app list to tag the running app
-                for (int i = 0; i < appGridAdapter.getCount(); i++) {
-                    AppObject existingApp = (AppObject) appGridAdapter.getItem(i);
+    @Override
+    public void onToggleHiddenApp(int appId) {
+        NvApp app = state.app(appId);
+        if (app == null) return;
+        boolean hidden = !hiddenAppIds.remove(appId);
+        if (hidden) hiddenAppIds.add(appId);
+        state.setHidden(appId, hidden);
+        HashSet<String> ids = new HashSet<>();
+        for (Integer id : hiddenAppIds) ids.add(id.toString());
+        getSharedPreferences(HIDDEN_APPS_PREF_FILENAME, MODE_PRIVATE).edit()
+                .putStringSet(uuidString, ids).apply();
+    }
 
-                    // There can only be one or zero apps running.
-                    if (existingApp.isRunning &&
-                            existingApp.app.getAppId() == details.runningGameId) {
-                        // This app was running and still is, so we're done now
-                        return;
-                    }
-                    else if (existingApp.app.getAppId() == details.runningGameId) {
-                        // This app wasn't running but now is
-                        existingApp.isRunning = true;
-                        updated = true;
-                    }
-                    else if (existingApp.isRunning) {
-                        // This app was running but now isn't
-                        existingApp.isRunning = false;
-                        updated = true;
-                    }
-                    else {
-                        // This app wasn't running and still isn't
-                    }
-                }
+    @Override
+    public void onShowAppDetails(int appId) {
+        NvApp app = state.app(appId);
+        if (app == null) return;
+        state.showMessage(getString(R.string.title_details), app.toString(), getString(android.R.string.ok));
+    }
 
-                if (updated) {
-                    appGridAdapter.notifyDataSetChanged();
-                }
+    @Override
+    public void onCreateAppShortcut(int appId) {
+        NvApp app = state.app(appId);
+        if (app == null || assetLoader == null) return;
+        assetLoader.loadArt(app, art -> {
+            if (art == null || !shortcutHelper.createPinnedGameShortcut(computer, app, art)) {
+                state.toast(getString(R.string.unable_to_pin_shortcut));
             }
         });
-    }
-
-    private void updateUiWithAppList(final List<NvApp> appList) {
-        AppView.this.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                boolean updated = false;
-
-                // First handle app updates and additions
-                for (NvApp app : appList) {
-                    boolean foundExistingApp = false;
-
-                    // Try to update an existing app in the list first
-                    for (int i = 0; i < appGridAdapter.getCount(); i++) {
-                        AppObject existingApp = (AppObject) appGridAdapter.getItem(i);
-                        if (existingApp.app.getAppId() == app.getAppId()) {
-                            // Found the app; update its properties
-                            if (!existingApp.app.getAppName().equals(app.getAppName())) {
-                                existingApp.app.setAppName(app.getAppName());
-                                updated = true;
-                            }
-
-                            foundExistingApp = true;
-                            break;
-                        }
-                    }
-
-                    if (!foundExistingApp) {
-                        // This app must be new
-                        appGridAdapter.addApp(new AppObject(app));
-
-                        // We could have a leftover shortcut from last time this PC was paired
-                        // or if this app was removed then added again. Enable those shortcuts
-                        // again if present.
-                        shortcutHelper.enableAppShortcut(computer, app);
-
-                        updated = true;
-                    }
-                }
-
-                // Next handle app removals
-                int i = 0;
-                while (i < appGridAdapter.getCount()) {
-                    boolean foundExistingApp = false;
-                    AppObject existingApp = (AppObject) appGridAdapter.getItem(i);
-
-                    // Check if this app is in the latest list
-                    for (NvApp app : appList) {
-                        if (existingApp.app.getAppId() == app.getAppId()) {
-                            foundExistingApp = true;
-                            break;
-                        }
-                    }
-
-                    // This app was removed in the latest app list
-                    if (!foundExistingApp) {
-                        shortcutHelper.disableAppShortcut(computer, existingApp.app, "App removed from PC");
-                        appGridAdapter.removeApp(existingApp);
-                        updated = true;
-
-                        // Check this same index again because the item at i+1 is now at i after
-                        // the removal
-                        continue;
-                    }
-
-                    // Move on to the next item
-                    i++;
-                }
-
-                if (updated) {
-                    appGridAdapter.notifyDataSetChanged();
-                }
-            }
-        });
-    }
-
-    @Override
-    public int getAdapterFragmentLayoutId() {
-        return PreferenceConfiguration.readPreferences(AppView.this).smallIconMode ?
-                    R.layout.app_grid_view_small : R.layout.app_grid_view;
-    }
-
-    @Override
-    public void receiveAbsListView(AbsListView listView) {
-        listView.setAdapter(appGridAdapter);
-        listView.setOnItemClickListener(new OnItemClickListener() {
-            @Override
-            public void onItemClick(AdapterView<?> arg0, View arg1, int pos,
-                                    long id) {
-                AppObject app = (AppObject) appGridAdapter.getItem(pos);
-
-                // Only open the context menu if something is running, otherwise start it
-                if (lastRunningAppId != 0) {
-                    openContextMenu(arg1);
-                } else {
-                    ServerHelper.doStart(AppView.this, app.app, computer, managerBinder);
-                }
-            }
-        });
-        UiHelper.applyStatusBarPadding(listView);
-        registerForContextMenu(listView);
-        listView.requestFocus();
-    }
-
-    public static class AppObject {
-        public final NvApp app;
-        public boolean isRunning;
-        public boolean isHidden;
-
-        public AppObject(NvApp app) {
-            if (app == null) {
-                throw new IllegalArgumentException("app must not be null");
-            }
-            this.app = app;
-        }
-
-        @Override
-        public String toString() {
-            return app.getAppName();
-        }
     }
 }

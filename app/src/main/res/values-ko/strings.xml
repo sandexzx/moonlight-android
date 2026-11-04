@@ -66,7 +66,6 @@
     <string name="applist_menu_quit">세션 종료</string>
     <string name="applist_menu_quit_and_start">현재 게임 종료 후 시작</string>
     <string name="applist_menu_cancel">취소</string>
-    <string name="applist_refresh_title">앱 리스트</string>
     <string name="applist_refresh_msg">앱 로드 중…</string>
     <string name="applist_refresh_error_title">오류</string>
     <string name="applist_refresh_error_msg">앱 리스트를 얻는데 실패함</string>

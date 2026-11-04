@@ -1,5 +1,7 @@
 package com.limelight.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
@@ -32,10 +34,10 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.limelight.ui.theme.AppBackground
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.limelight.ui.theme.AppBackground
 
 /** Background + scrolling content: what floating bars, sheets and menus refract. */
 val LocalBarBackdrop = staticCompositionLocalOf<Backdrop> { error("No AppScaffold above") }
@@ -130,6 +132,39 @@ fun AppScaffold(
                 bottomBar()
             }
             overlay()
+        }
+    }
+}
+
+/**
+ * Whole-screen frame: [AppScaffold] plus the overlay layer. The scaffold is the backdrop of that
+ * layer, so menus and alerts refract the screen beneath them. [ambient] is the room's light,
+ * eased when it changes.
+ */
+@Composable
+fun GlassScreen(
+    overlay: OverlayState,
+    ambient: Color,
+    bottomBar: @Composable () -> Unit = {},
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    val appBackdrop = rememberLayerBackdrop()
+    val light by animateColorAsState(targetValue = ambient, animationSpec = tween(700), label = "ambient")
+
+    CompositionLocalProvider(LocalOverlay provides overlay) {
+        Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .layerBackdrop(appBackdrop),
+            ) {
+                AppScaffold(
+                    background = { AppBackground(it, light) },
+                    bottomBar = bottomBar,
+                    content = content,
+                )
+            }
+            OverlayHost(overlay, appBackdrop)
         }
     }
 }

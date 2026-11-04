@@ -86,7 +86,6 @@
     <string name="applist_menu_details"> 查看详情 </string>
     <string name="applist_menu_scut"> 创建快捷方式 </string>
     <string name="applist_menu_tv_channel"> 添加到频道 </string>
-    <string name="applist_refresh_title"> 游戏列表 </string>
     <string name="applist_refresh_msg"> 刷新中…… </string>
     <string name="applist_refresh_error_title"> 错误 </string>
     <string name="applist_refresh_error_msg"> 获取列表失败 </string>

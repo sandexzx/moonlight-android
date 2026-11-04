@@ -1,7 +1,8 @@
 package com.limelight.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Column
@@ -22,15 +23,21 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kyant.shapes.RoundedRectangle
 import com.limelight.ui.theme.AppType
 import com.limelight.ui.theme.Style
 
+/** Screens stay a readable column on wide or landscape windows. */
+val ContentMaxWidth = 520.dp
+
 /** iOS-style tap feedback: dims while pressed instead of a ripple. */
+@OptIn(ExperimentalFoundationApi::class)
 fun Modifier.tappable(
     enabled: Boolean = true,
     role: Role = Role.Button,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ): Modifier = composed {
     val interactionSource = remember { MutableInteractionSource() }
@@ -38,11 +45,12 @@ fun Modifier.tappable(
     val alpha by animateFloatAsState(if (pressed) 0.45f else 1f, label = "tapAlpha")
     this
         .graphicsLayer { this.alpha = alpha }
-        .clickable(
+        .combinedClickable(
             interactionSource = interactionSource,
             indication = null,
             enabled = enabled,
             role = role,
+            onLongClick = onLongClick,
             onClick = onClick,
         )
 }
@@ -82,6 +90,7 @@ fun LargeTitle(title: String, modifier: Modifier = Modifier) {
         style = AppType.largeTitle,
         color = Style.textPrimary,
         maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
         modifier = modifier
             .padding(horizontal = 4.dp, vertical = 4.dp)
             .semantics { heading() },

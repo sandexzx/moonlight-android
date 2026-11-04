@@ -57,7 +57,6 @@
     <string name="applist_menu_quit">Cerrar sesión</string>
     <string name="applist_menu_quit_and_start">Cerrar juego actual e iniciar</string>
     <string name="applist_menu_cancel">Cancelar</string>
-    <string name="applist_refresh_title">Lista de aplicaciones</string>
     <string name="applist_refresh_msg">Actualizando lista de aplicaciones…</string>
     <string name="applist_refresh_error_title">Error</string>
     <string name="applist_refresh_error_msg">Error al cargar lista de aplicaciones</string>
