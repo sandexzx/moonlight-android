@@ -5,13 +5,18 @@ import android.content.Context;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.SurfaceView;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
 
 public class StreamView extends SurfaceView {
     private double desiredAspectRatio;
     private InputCallbacks inputCallbacks;
 
     public void setDesiredAspectRatio(double aspectRatio) {
-        this.desiredAspectRatio = aspectRatio;
+        if (aspectRatio != desiredAspectRatio) {
+            this.desiredAspectRatio = aspectRatio;
+            requestLayout();
+        }
     }
 
     public void setInputCallbacks(InputCallbacks callbacks) {
@@ -56,6 +61,13 @@ public class StreamView extends SurfaceView {
         }
 
         setMeasuredDimension(measuredWidth, measuredHeight);
+    }
+
+    @Override
+    public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
+        // Keyboards otherwise take over the whole window in landscape, hiding the stream
+        outAttrs.imeOptions |= EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_FULLSCREEN;
+        return super.onCreateInputConnection(outAttrs);
     }
 
     @Override

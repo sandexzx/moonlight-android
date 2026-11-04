@@ -73,6 +73,8 @@ import android.view.View.OnGenericMotionListener;
 import android.view.View.OnSystemUiVisibilityChangeListener;
 import android.view.View.OnTouchListener;
 import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowInsetsAnimation;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.view.inputmethod.InputMethodManager;
@@ -85,6 +87,7 @@ import java.lang.reflect.Method;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.util.List;
 import java.util.Locale;
 
 
@@ -95,6 +98,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private int lastButtonState = 0;
 
     // Only 2 touches are supported
+    private boolean fillWindowWithStream;
+    private int keyboardHeight;
+
     private final TouchContext[] touchContextMap = new TouchContext[2];
     private long threeFingerDownTime = 0;
 
@@ -193,6 +199,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         // Full-screen
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
+        // We lay out around the software keyboard ourselves, so we need its insets unconsumed
+        getWindow().setDecorFitsSystemWindows(false);
+
         // If we're going to use immersive mode, we want to have
         // the entire screen
         getWindow().getDecorView().setSystemUiVisibility(
@@ -240,6 +249,14 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         streamView.setOnGenericMotionListener(this);
         streamView.setOnKeyListener(this);
         streamView.setInputCallbacks(this);
+
+        // Keep the picture visible above the software keyboard
+        View streamParent = (View)streamView.getParent();
+        streamParent.setOnApplyWindowInsetsListener((view, insets) -> {
+            setKeyboardHeight(insets.getInsets(WindowInsets.Type.ime()).bottom);
+            return insets;
+        });
+        streamParent.setWindowInsetsAnimationCallback(new KeyboardMotionCallback());
 
         // Listen for touch events on the background touch view to enable trackpad mode
         // to work on areas outside of the StreamView itself. We use a separate View
@@ -535,6 +552,85 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         streamView.getHolder().addCallback(this);
     }
 
+    // Filling the window only suits the orientation the stream was made for, with the whole
+    // window free. Otherwise the picture keeps its proportions.
+    private void updateStreamFit() {
+        boolean landscapeWindow = getResources().getConfiguration().orientation != Configuration.ORIENTATION_PORTRAIT;
+        boolean landscapeStream = prefConfig.width > prefConfig.height;
+        boolean fill = fillWindowWithStream && keyboardHeight == 0 && landscapeWindow == landscapeStream;
+
+        // Set the surface to scale based on the aspect ratio of the stream
+        streamView.setDesiredAspectRatio(fill ? 0 : (double)prefConfig.width / (double)prefConfig.height);
+    }
+
+    // The software keyboard takes the bottom of the window, and the picture centers itself in
+    // what's left. Margins rather than padding on the parent, so the on-screen controls and
+    // the touch area stay where they are.
+    private void setKeyboardHeight(int height) {
+        if (height == keyboardHeight) {
+            return;
+        }
+        keyboardHeight = height;
+
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams)streamView.getLayoutParams();
+        // FrameLayout takes both margins off the available height, but moves a centered child
+        // by their difference. A 1:3 split gives up the keyboard's height and shifts the
+        // center by half of it.
+        params.topMargin = height / 4;
+        params.bottomMargin = height - params.topMargin;
+        streamView.setLayoutParams(params);
+
+        updateStreamFit();
+    }
+
+    // The new layout lands as the keyboard starts moving. This offsets the picture back to where
+    // it was, then lets it travel to its place along with the keyboard.
+    private final class KeyboardMotionCallback extends WindowInsetsAnimation.Callback {
+        private float startCenterY;
+        private float travel;
+
+        KeyboardMotionCallback() {
+            super(DISPATCH_MODE_STOP);
+        }
+
+        private boolean isKeyboard(WindowInsetsAnimation animation) {
+            return (animation.getTypeMask() & WindowInsets.Type.ime()) != 0;
+        }
+
+        @Override
+        public void onPrepare(WindowInsetsAnimation animation) {
+            if (isKeyboard(animation)) {
+                startCenterY = streamView.getY() + streamView.getHeight() / 2f;
+            }
+        }
+
+        @Override
+        public WindowInsetsAnimation.Bounds onStart(WindowInsetsAnimation animation, WindowInsetsAnimation.Bounds bounds) {
+            if (isKeyboard(animation)) {
+                travel = startCenterY - (streamView.getTop() + streamView.getHeight() / 2f);
+                streamView.setTranslationY(travel);
+            }
+            return bounds;
+        }
+
+        @Override
+        public WindowInsets onProgress(WindowInsets insets, List<WindowInsetsAnimation> runningAnimations) {
+            for (WindowInsetsAnimation animation : runningAnimations) {
+                if (isKeyboard(animation)) {
+                    streamView.setTranslationY(travel * (1 - animation.getInterpolatedFraction()));
+                }
+            }
+            return insets;
+        }
+
+        @Override
+        public void onEnd(WindowInsetsAnimation animation) {
+            if (isKeyboard(animation)) {
+                streamView.setTranslationY(0);
+            }
+        }
+    }
+
     private void setPreferredOrientationForCurrentDisplay() {
         Display display = getWindowManager().getDefaultDisplay();
 
@@ -569,8 +665,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             }
         }
         else {
-            // For regular displays, we always request landscape
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE);
+            // Regular displays can stream in either orientation, but the on-screen controls
+            // only lay out properly in landscape
+            setRequestedOrientation(prefConfig.onscreenController ?
+                    ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE :
+                    ActivityInfo.SCREEN_ORIENTATION_FULL_USER);
         }
     }
 
@@ -580,6 +679,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
         // Set requested orientation for possible new screen size
         setPreferredOrientationForCurrentDisplay();
+
+        updateStreamFit();
 
         if (virtualController != null) {
             // Refresh layout of OSC for possible new screen size
@@ -950,14 +1051,12 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             }
         }
 
-        if (prefConfig.stretchVideo || aspectRatioMatch) {
+        fillWindowWithStream = prefConfig.stretchVideo || aspectRatioMatch;
+        if (fillWindowWithStream) {
             // Set the surface to the size of the video
             streamView.getHolder().setFixedSize(prefConfig.width, prefConfig.height);
         }
-        else {
-            // Set the surface to scale based on the aspect ratio of the stream
-            streamView.setDesiredAspectRatio((double)prefConfig.width / (double)prefConfig.height);
-        }
+        updateStreamFit();
 
         // Set the desired refresh rate that will get passed into setFrameRate() later
         desiredRefreshRate = displayRefreshRate;
