@@ -31,6 +31,7 @@ import com.limelight.preferences.GlPreferences;
 import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.ui.GameGestures;
 import com.limelight.ui.StreamView;
+import com.limelight.ui.StreamZoom;
 import com.limelight.utils.Dialog;
 import com.limelight.utils.ServerHelper;
 import com.limelight.utils.ShortcutHelper;
@@ -100,6 +101,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     // Only 2 touches are supported
     private boolean fillWindowWithStream;
     private int keyboardHeight;
+    private StreamZoom streamZoom;
+    private boolean touchTakenByZoom;
 
     private final TouchContext[] touchContextMap = new TouchContext[2];
     private long threeFingerDownTime = 0;
@@ -257,6 +260,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             return insets;
         });
         streamParent.setWindowInsetsAnimationCallback(new KeyboardMotionCallback());
+        streamZoom = new StreamZoom(streamView, streamParent);
 
         // Listen for touch events on the background touch view to enable trackpad mode
         // to work on areas outside of the StreamView itself. We use a separate View
@@ -571,6 +575,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             return;
         }
         keyboardHeight = height;
+        streamZoom.setKeyboardHeight(height);
 
         FrameLayout.LayoutParams params = (FrameLayout.LayoutParams)streamView.getLayoutParams();
         // FrameLayout takes both margins off the available height, but moves a centered child
@@ -597,18 +602,23 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             return (animation.getTypeMask() & WindowInsets.Type.ime()) != 0;
         }
 
+        private float visualCenterY() {
+            return streamView.getY() + streamView.getHeight() * streamView.getScaleY() / 2f;
+        }
+
         @Override
         public void onPrepare(WindowInsetsAnimation animation) {
             if (isKeyboard(animation)) {
-                startCenterY = streamView.getY() + streamView.getHeight() / 2f;
+                startCenterY = visualCenterY();
             }
         }
 
         @Override
         public WindowInsetsAnimation.Bounds onStart(WindowInsetsAnimation animation, WindowInsetsAnimation.Bounds bounds) {
             if (isKeyboard(animation)) {
-                travel = startCenterY - (streamView.getTop() + streamView.getHeight() / 2f);
-                streamView.setTranslationY(travel);
+                streamZoom.setKeyboardOffset(0);
+                travel = startCenterY - visualCenterY();
+                streamZoom.setKeyboardOffset(travel);
             }
             return bounds;
         }
@@ -617,7 +627,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         public WindowInsets onProgress(WindowInsets insets, List<WindowInsetsAnimation> runningAnimations) {
             for (WindowInsetsAnimation animation : runningAnimations) {
                 if (isKeyboard(animation)) {
-                    streamView.setTranslationY(travel * (1 - animation.getInterpolatedFraction()));
+                    streamZoom.setKeyboardOffset(travel * (1 - animation.getInterpolatedFraction()));
                 }
             }
             return insets;
@@ -626,7 +636,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         @Override
         public void onEnd(WindowInsetsAnimation animation) {
             if (isKeyboard(animation)) {
-                streamView.setTranslationY(0);
+                streamZoom.setKeyboardOffset(0);
             }
         }
     }
@@ -2296,6 +2306,29 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     @SuppressLint("ClickableViewAccessibility")
+    // Pinches are taken here because touch splitting would hand each view only its own finger
+    // when they land on the picture and on the area around it.
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        // The on-screen controls need two fingers of their own
+        if (!prefConfig.touchscreenTrackpad || prefConfig.onscreenController ||
+                !event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN)) {
+            return super.dispatchTouchEvent(event);
+        }
+
+        boolean pinching = streamZoom.onTouchEvent(event);
+        if (pinching && !touchTakenByZoom) {
+            // These fingers were on their way to being a click or a scroll
+            MotionEvent cancel = MotionEvent.obtain(event);
+            cancel.setAction(MotionEvent.ACTION_CANCEL);
+            super.dispatchTouchEvent(cancel);
+            cancel.recycle();
+        }
+        touchTakenByZoom = pinching;
+
+        return pinching || super.dispatchTouchEvent(event);
+    }
+
     @Override
     public boolean onTouch(View view, MotionEvent event) {
         if (event.getAction() == MotionEvent.ACTION_DOWN) {
