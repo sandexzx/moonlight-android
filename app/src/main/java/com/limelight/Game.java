@@ -151,6 +151,7 @@ public class Game extends ComponentActivity implements SurfaceHolder.Callback,
     private boolean autoEnterPip = false;
     private boolean surfaceCreated = false;
     private boolean attemptedConnection = false;
+    private boolean reconnecting = false;
     private int suppressPipRefCount = 0;
     private String pcName;
     private String appName;
@@ -1321,12 +1322,7 @@ public class Game extends ComponentActivity implements SurfaceHolder.Callback,
             inputManager.unregisterInputDeviceListener(keyboardTranslator);
         }
 
-        if (lowLatencyWifiLock != null) {
-            lowLatencyWifiLock.release();
-        }
-        if (highPerfWifiLock != null) {
-            highPerfWifiLock.release();
-        }
+        releaseWifiLocks();
 
         if (connectedToUsbDriverService) {
             // Unbind from the discovery service
@@ -1335,6 +1331,25 @@ public class Game extends ComponentActivity implements SurfaceHolder.Callback,
 
         // Destroy the capture provider
         inputCaptureProvider.destroy();
+    }
+
+    private void releaseWifiLocks() {
+        if (lowLatencyWifiLock != null) {
+            lowLatencyWifiLock.release();
+        }
+        if (highPerfWifiLock != null) {
+            highPerfWifiLock.release();
+        }
+    }
+
+    @Override
+    protected void onRestart() {
+        super.onRestart();
+
+        // onStop() ended the stream and a connection can't be reused, so start over from
+        // onCreate() with the same intent. The host has kept the session, so this resumes it.
+        reconnecting = true;
+        recreate();
     }
 
     @Override
@@ -1362,6 +1377,15 @@ public class Game extends ComponentActivity implements SurfaceHolder.Callback,
         if (virtualController != null) {
             virtualController.hide();
         }
+
+        // This instance is on its way out and already stopped its stream
+        if (reconnecting) {
+            return;
+        }
+
+        // Leaving the app isn't a quit, so stay in the task and reconnect in onRestart().
+        // After a failure or a real quit there is no stream to come back to.
+        boolean canReturn = conn != null && !displayedFailureDialog && !isFinishing();
 
         if (conn != null) {
             int videoFormat = decoderRenderer.getActiveVideoFormat();
@@ -1421,7 +1445,12 @@ public class Game extends ComponentActivity implements SurfaceHolder.Callback,
             }
         }
 
-        finish();
+        if (canReturn) {
+            releaseWifiLocks();
+        }
+        else {
+            finish();
+        }
     }
 
     private void setInputGrabState(boolean grab) {
@@ -2877,6 +2906,7 @@ public class Game extends ComponentActivity implements SurfaceHolder.Callback,
             // Update GameManager state to indicate we're "loading" while connecting
             UiHelper.notifyStreamConnecting(Game.this);
 
+            connecting = true;
             decoderRenderer.setRenderTarget(holder);
             conn.start(new AndroidAudioRenderer(Game.this, prefConfig.enableAudioFx),
                     decoderRenderer, Game.this);

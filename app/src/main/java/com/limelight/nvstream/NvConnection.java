@@ -46,6 +46,10 @@ public class NvConnection {
     private String uniqueId;
     private ConnectionContext context;
     private static Semaphore connectionAllowed = new Semaphore(1);
+
+    // stop() can arrive while start() is still running, and must then stop only what really started
+    private volatile boolean stopRequested = false;
+    private boolean started = false; // Guarded by MoonBridge.class
     private final boolean isMonkey;
     private final Context appContext;
 
@@ -87,12 +91,20 @@ public class NvConnection {
     }
 
     public void stop() {
+        stopRequested = true;
+
         // Interrupt any pending connection. This is thread-safe.
         MoonBridge.interruptConnection();
 
         // Moonlight-core is not thread-safe with respect to connection start and stop, so
         // we must not invoke that functionality in parallel.
         synchronized (MoonBridge.class) {
+            // Otherwise start() never got a connection going and handles the semaphore itself
+            if (!started) {
+                return;
+            }
+            started = false;
+
             MoonBridge.stopConnection();
             MoonBridge.cleanupBridge();
         }
@@ -424,6 +436,11 @@ public class NvConnection {
                 // Moonlight-core is not thread-safe with respect to connection start and stop, so
                 // we must not invoke that functionality in parallel.
                 synchronized (MoonBridge.class) {
+                    if (stopRequested) {
+                        connectionAllowed.release();
+                        return;
+                    }
+
                     MoonBridge.setupBridge(videoDecoderRenderer, audioRenderer, connectionListener);
                     int ret = MoonBridge.startConnection(context.serverAddress.address,
                             context.serverAppVersion, context.serverGfeVersion, context.rtspSessionUrl,
@@ -445,6 +462,8 @@ public class NvConnection {
                         connectionAllowed.release();
                         return;
                     }
+
+                    started = true;
                 }
             }
         }).start();
