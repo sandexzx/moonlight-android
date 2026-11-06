@@ -1,12 +1,21 @@
 package com.limelight.ui.home
 
 import android.content.Context
+import android.view.HapticFeedbackConstants
+import androidx.activity.compose.BackHandler
+import androidx.annotation.StringRes
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -25,7 +35,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
@@ -48,13 +60,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
@@ -79,19 +95,39 @@ import com.limelight.ui.components.Spinner
 import com.limelight.ui.components.TextAction
 import com.limelight.ui.components.menuAnchor
 import com.limelight.ui.components.rememberMenuAnchor
+import com.limelight.ui.settings.SettingsState
+import com.limelight.ui.settings.SettingsTab
 import com.limelight.ui.theme.AppStyle
 import com.limelight.ui.theme.AppType
 import com.limelight.ui.theme.Style
 
-/** Root of the computers screen. */
+private enum class HomeTab(@StringRes val title: Int, val icon: ImageVector) {
+    Computers(R.string.home_title, Icons.Rounded.DesktopWindows),
+    Settings(R.string.home_tab_settings, Icons.Rounded.Settings),
+}
+
+/** Root of the home screen: the computers and the settings, side by side in the tab bar. */
 @Composable
-fun PcHomeApp(state: PcHomeState, actions: PcHomeActions) {
+fun PcHomeApp(state: PcHomeState, settings: SettingsState, actions: PcHomeActions) {
+    var tab by rememberSaveable { mutableStateOf(HomeTab.Computers) }
+    // Kept out here because Crossfade disposes the tab it leaves, scroll position included.
+    val computersList = rememberLazyListState()
+    val settingsList = rememberLazyListState()
+
+    // Before GlassScreen, so that an open menu or alert takes the back press first.
+    BackHandler(enabled = tab != HomeTab.Computers) { tab = HomeTab.Computers }
+
     GlassScreen(
         overlay = state.overlay,
         ambient = ambientColor(state.computers.firstOrNull()?.status),
-        bottomBar = { HomeTabBar(onOpenSettings = actions::onOpenSettings) },
+        bottomBar = { HomeTabBar(tab, onSelect = { tab = it }) },
     ) { padding ->
-        PcHomeContent(state, actions, padding)
+        Crossfade(targetState = tab, animationSpec = tween(180), label = "tab") { shown ->
+            when (shown) {
+                HomeTab.Computers -> PcHomeContent(state, actions, padding, computersList)
+                HomeTab.Settings -> SettingsTab(settings, padding, settingsList)
+            }
+        }
     }
 }
 
@@ -104,8 +140,14 @@ private fun ambientColor(status: PcStatus?): Color = when (status) {
 }
 
 @Composable
-private fun PcHomeContent(state: PcHomeState, actions: PcHomeActions, padding: PaddingValues) {
+private fun PcHomeContent(
+    state: PcHomeState,
+    actions: PcHomeActions,
+    padding: PaddingValues,
+    listState: LazyListState,
+) {
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)),
@@ -352,14 +394,12 @@ private fun pcMenu(context: Context, card: PcCardModel, actions: PcHomeActions):
     item(R.string.pcview_menu_delete_pc, Icons.Rounded.Delete, destructive = true) { actions.onDeletePc(uuid) }
 }
 
-/**
- * Floating glass tab bar. Settings is still a separate activity, so its tab only opens it and
- * Computers stays selected; it becomes a real tab when that screen moves to Compose.
- */
+/** Floating glass tab bar. The highlight slides between the tabs rather than jumping. */
 @Composable
-private fun HomeTabBar(onOpenSettings: () -> Unit) {
+private fun HomeTabBar(selected: HomeTab, onSelect: (HomeTab) -> Unit) {
     val style = Style
     val shape = remember { Capsule() }
+    val view = LocalView.current
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Glass(
             backdrop = LocalBarBackdrop.current,
@@ -370,26 +410,45 @@ private fun HomeTabBar(onOpenSettings: () -> Unit) {
                 .width(236.dp)
                 .height(64.dp),
         ) {
-            Row(
+            BoxWithConstraints(
                 Modifier
                     .fillMaxSize()
-                    .padding(4.dp)
-                    .selectableGroup(),
+                    .padding(4.dp),
             ) {
-                TabItem(
-                    title = stringResource(R.string.home_title),
-                    icon = Icons.Rounded.DesktopWindows,
-                    selected = true,
-                    onClick = {},
-                    modifier = Modifier.weight(1f),
+                val tabWidth = maxWidth / HomeTab.entries.size
+                val highlightOffset by animateDpAsState(
+                    targetValue = tabWidth * selected.ordinal,
+                    animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow),
+                    label = "tabHighlight",
                 )
-                TabItem(
-                    title = stringResource(R.string.home_tab_settings),
-                    icon = Icons.Rounded.Settings,
-                    selected = false,
-                    onClick = onOpenSettings,
-                    modifier = Modifier.weight(1f),
+                Box(
+                    Modifier
+                        .offset(x = highlightOffset)
+                        .width(tabWidth)
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .background(style.textPrimary.copy(alpha = 0.06f)),
                 )
+                Row(
+                    Modifier
+                        .fillMaxSize()
+                        .selectableGroup(),
+                ) {
+                    HomeTab.entries.forEach { tab ->
+                        TabItem(
+                            title = stringResource(tab.title),
+                            icon = tab.icon,
+                            selected = tab == selected,
+                            onClick = {
+                                if (tab != selected) {
+                                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                    onSelect(tab)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
             }
         }
     }
@@ -404,12 +463,13 @@ private fun TabItem(
     modifier: Modifier = Modifier,
 ) {
     val style = Style
-    val color = if (selected) style.accentText else style.textPrimary.copy(alpha = 0.72f)
+    val color by animateColorAsState(
+        if (selected) style.accentText else style.textPrimary.copy(alpha = 0.72f),
+        label = "tabColor",
+    )
     Column(
         modifier
             .fillMaxHeight()
-            .clip(CircleShape)
-            .background(if (selected) style.textPrimary.copy(alpha = 0.06f) else Color.Transparent)
             .selectable(
                 selected = selected,
                 interactionSource = null,

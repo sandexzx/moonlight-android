@@ -98,23 +98,6 @@ public class UiHelper {
         }
     }
 
-    public static void applyStatusBarPadding(View view) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // This applies the padding that we omitted in notifyNewRootView() on Q
-            view.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
-                @Override
-                public WindowInsets onApplyWindowInsets(View view, WindowInsets windowInsets) {
-                    view.setPadding(view.getPaddingLeft(),
-                            view.getPaddingTop(),
-                            view.getPaddingRight(),
-                            windowInsets.getTappableElementInsets().bottom);
-                    return windowInsets;
-                }
-            });
-            view.requestApplyInsets();
-        }
-    }
-
     // Compose handles its own insets; do not pad its content view.
     public static void notifyNewComposeRootView(Activity activity) {
         setGameModeStatus(activity, false, false);

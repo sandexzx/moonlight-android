@@ -13,9 +13,10 @@ import android.opengl.GLSurfaceView;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
-import android.preference.PreferenceManager;
 
 import androidx.activity.ComponentActivity;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 
 import com.limelight.binding.PlatformBinding;
 import com.limelight.binding.crypto.AndroidCryptoProvider;
@@ -30,7 +31,6 @@ import com.limelight.nvstream.http.PairingManager.PairState;
 import com.limelight.nvstream.wol.WakeOnLanSender;
 import com.limelight.preferences.AddComputerManually;
 import com.limelight.preferences.GlPreferences;
-import com.limelight.preferences.StreamSettings;
 import com.limelight.ui.home.PcHomeActions;
 import com.limelight.ui.home.PcHomeHost;
 import com.limelight.ui.home.PcHomeState;
@@ -47,6 +47,12 @@ import javax.microedition.khronos.opengles.GL10;
 
 public class PcView extends ComponentActivity implements PcHomeActions {
     private final PcHomeState homeState = new PcHomeState();
+    private final ActivityResultLauncher<Intent> addPcLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() == RESULT_OK) {
+                    homeState.toast(getString(R.string.addpc_success));
+                }
+            });
     private ShortcutHelper shortcutHelper;
     private ComputerManagerService.ComputerManagerBinder managerBinder;
     private boolean freezeUpdates, runningPolling, inForeground;
@@ -106,7 +112,6 @@ public class PcView extends ComponentActivity implements PcHomeActions {
                 Service.BIND_AUTO_CREATE);
         UiHelper.notifyNewComposeRootView(this);
         setShouldDockBigOverlays(false);
-        PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
         PcHomeHost.attach(this, homeState, this);
     }
 
@@ -373,10 +378,7 @@ public class PcView extends ComponentActivity implements PcHomeActions {
     public void onGameStreamInfo() { HelpLauncher.launchGameStreamEolFaq(this); }
 
     @Override
-    public void onOpenSettings() { startActivity(new Intent(this, StreamSettings.class)); }
-
-    @Override
-    public void onAddPc() { startActivity(new Intent(this, AddComputerManually.class)); }
+    public void onAddPc() { addPcLauncher.launch(new Intent(this, AddComputerManually.class)); }
 
     @Override
     public void onHelp() { HelpLauncher.launchSetupGuide(this); }

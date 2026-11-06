@@ -74,6 +74,7 @@
     <string name="applist_quit_confirmation">Вы уверены, что хотите выйти из запущенного приложения? Все несохранённые данные будут потеряны.</string>
     <!-- Add computer manually activity -->
     <string name="title_add_pc">Добавление ПК вручную</string>
+    <string name="addpc_action">Добавить ПК</string>
     <string name="msg_add_pc">Соединение с ПК…</string>
     <string name="addpc_fail">Не удалось подключиться к выбранному компьютеру. Удостоверьтесь, что необходимые порты разрешены в настройках брандмауэра.</string>
     <string name="addpc_success">Компьютер добавлен успешно</string>

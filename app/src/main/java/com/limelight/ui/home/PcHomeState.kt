@@ -6,11 +6,13 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.limelight.nvstream.http.ComputerDetails
 import com.limelight.nvstream.http.PairingManager
 import com.limelight.ui.components.AlertRequest
 import com.limelight.ui.components.OverlayState
+import com.limelight.ui.settings.SettingsState
 import com.limelight.ui.theme.setGlassContent
 
 /** What a PC card shows and offers. */
@@ -39,7 +41,6 @@ interface PcHomeActions {
     fun onShowDetails(uuid: String)
     fun onTestNetwork()
     fun onGameStreamInfo()
-    fun onOpenSettings()
     fun onAddPc()
     fun onHelp()
 }
@@ -148,6 +149,9 @@ private fun ComputerDetails.toCard() = PcCardModel(
 object PcHomeHost {
     @JvmStatic
     fun attach(activity: ComponentActivity, state: PcHomeState, actions: PcHomeActions) {
-        activity.setGlassContent { PcHomeApp(state, actions) }
+        activity.setGlassContent {
+            val settings = remember { SettingsState(activity) }
+            PcHomeApp(state, settings, actions)
+        }
     }
 }
