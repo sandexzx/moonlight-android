@@ -110,6 +110,9 @@ android {
 
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+
+            // Sideloaded onto one phone, so the debug key is enough to install it.
+            signingConfig signingConfigs.debug
         }
     }
 
