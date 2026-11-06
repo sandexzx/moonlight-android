@@ -5,6 +5,7 @@ import com.limelight.binding.PlatformBinding;
 import com.limelight.binding.audio.AndroidAudioRenderer;
 import com.limelight.binding.input.ControllerHandler;
 import com.limelight.binding.input.KeyboardTranslator;
+import com.limelight.binding.input.PacedInput;
 import com.limelight.binding.input.capture.InputCaptureManager;
 import com.limelight.binding.input.capture.InputCaptureProvider;
 import com.limelight.binding.input.touch.AbsoluteTouchContext;
@@ -32,11 +33,17 @@ import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.ui.GameGestures;
 import com.limelight.ui.StreamView;
 import com.limelight.ui.StreamZoom;
+import com.limelight.ui.stream.BarKey;
+import com.limelight.ui.stream.KeyBarKt;
+import com.limelight.ui.stream.KeyBarState;
 import com.limelight.utils.Dialog;
 import com.limelight.utils.ServerHelper;
 import com.limelight.utils.ShortcutHelper;
 import com.limelight.utils.SpinnerDialog;
 import com.limelight.utils.UiHelper;
+
+import androidx.activity.ComponentActivity;
+import androidx.compose.ui.platform.ComposeView;
 
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
@@ -51,6 +58,7 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.graphics.Insets;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.hardware.input.InputManager;
@@ -73,6 +81,7 @@ import android.view.View;
 import android.view.View.OnGenericMotionListener;
 import android.view.View.OnSystemUiVisibilityChangeListener;
 import android.view.View.OnTouchListener;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsAnimation;
@@ -91,16 +100,21 @@ import java.security.cert.X509Certificate;
 import java.util.List;
 import java.util.Locale;
 
-
-public class Game extends Activity implements SurfaceHolder.Callback,
+public class Game extends ComponentActivity implements SurfaceHolder.Callback,
         OnGenericMotionListener, OnTouchListener, NvConnectionListener, EvdevListener,
         OnSystemUiVisibilityChangeListener, GameGestures, StreamView.InputCallbacks,
-        PerfOverlayListener, UsbDriverService.UsbDriverStateListener, View.OnKeyListener {
+        PerfOverlayListener, UsbDriverService.UsbDriverStateListener, View.OnKeyListener,
+        KeyBarState.Listener {
     private int lastButtonState = 0;
 
     // Only 2 touches are supported
     private boolean fillWindowWithStream;
     private int keyboardHeight;
+    private ComposeView keyBarView;
+    private KeyBarState keyBar;
+    private PacedInput pacedInput;
+    private int keyBarHeight;
+    private boolean keyboardMoving;
     private StreamZoom streamZoom;
     private boolean touchTakenByZoom;
 
@@ -117,6 +131,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private static final int STYLUS_UP_DEAD_ZONE_RADIUS = 50;
 
     private static final int THREE_FINGER_TAP_THRESHOLD = 300;
+
+    private static final String KEY_BAR_PREFS = "KeyBar";
+    private static final String KEY_BAR_SMART_TYPING = "smartTyping";
 
     private ControllerHandler controllerHandler;
     private KeyboardTranslator keyboardTranslator;
@@ -257,10 +274,37 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         View streamParent = (View)streamView.getParent();
         streamParent.setOnApplyWindowInsetsListener((view, insets) -> {
             setKeyboardHeight(insets.getInsets(WindowInsets.Type.ime()).bottom);
+            Insets sides = insets.getInsets(WindowInsets.Type.displayCutout() | WindowInsets.Type.navigationBars());
+            keyBarView.setPadding(sides.left, 0, sides.right, 0);
             return insets;
         });
         streamParent.setWindowInsetsAnimationCallback(new KeyboardMotionCallback());
         streamZoom = new StreamZoom(streamView, streamParent);
+
+        keyBar = new KeyBarState(getSharedPreferences(KEY_BAR_PREFS, 0).getBoolean(KEY_BAR_SMART_TYPING, true), this);
+        pacedInput = new PacedInput(new PacedInput.Callbacks() {
+            @Override
+            public void sendText(String codePoint) {
+                conn.sendUtf8Text(codePoint);
+            }
+
+            @Override
+            public void sendTextKey(int code) {
+                short translated = keyboardTranslator.translate(code, -1);
+                conn.sendKeyboardInput(translated, KeyboardPacket.KEY_DOWN, (byte)0, (byte)0);
+                conn.sendKeyboardInput(translated, KeyboardPacket.KEY_UP, (byte)0, (byte)0);
+            }
+
+            @Override
+            public void onProgress(Float fraction) {
+                runOnUiThread(() -> keyBar.setSendProgress(fraction));
+            }
+        });
+        keyBarView = findViewById(R.id.keyBar);
+        KeyBarKt.attachKeyBar(keyBarView, keyBar);
+        // Layout is still running here, and the picture's margins depend on this height
+        keyBarView.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
+                view.post(() -> setKeyBarHeight(view.getHeight())));
 
         // Listen for touch events on the background touch view to enable trackpad mode
         // to work on areas outside of the StreamView itself. We use a separate View
@@ -575,6 +619,54 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             return;
         }
         keyboardHeight = height;
+
+        if (height == 0) {
+            keyBar.releaseModifiers();
+            leaveComposer();
+        }
+        if (!keyboardMoving) {
+            placeKeyBar(height);
+        }
+
+        layoutStreamAboveKeyboard();
+        updateStreamFit();
+    }
+
+    private void setKeyBarHeight(int height) {
+        if (height != keyBarHeight) {
+            keyBarHeight = height;
+            layoutStreamAboveKeyboard();
+        }
+    }
+
+    // The bar rides on top of the keyboard rather than being laid out against it, so it can
+    // follow the keyboard frame by frame.
+    private void placeKeyBar(int keyboardInset) {
+        keyBarView.setTranslationY(-keyboardInset);
+        keyBarView.setVisibility(keyboardInset > 0 || keyBar.getComposerOpen() ? View.VISIBLE : View.INVISIBLE);
+    }
+
+    // The text field brings the keyboard up by taking focus, so the bar has to be on screen and
+    // open to focus first. It rises with the keyboard from the bottom of the window.
+    private void openComposer() {
+        keyBarView.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        keyBar.setComposerOpen(true);
+        placeKeyBar(keyboardHeight);
+    }
+
+    // The stream gets focus back so a physical keyboard and mouse carry on reaching the PC
+    private void leaveComposer() {
+        if (!keyBar.getComposerOpen()) {
+            return;
+        }
+        keyBar.setComposerOpen(false);
+        keyBarView.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        streamView.requestFocus();
+        placeKeyBar(keyboardHeight);
+    }
+
+    private void layoutStreamAboveKeyboard() {
+        int height = keyboardHeight > 0 ? keyboardHeight + keyBarHeight : 0;
         streamZoom.setKeyboardHeight(height);
 
         FrameLayout.LayoutParams params = (FrameLayout.LayoutParams)streamView.getLayoutParams();
@@ -584,8 +676,76 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         params.topMargin = height / 4;
         params.bottomMargin = height - params.topMargin;
         streamView.setLayoutParams(params);
+    }
 
-        updateStreamFit();
+    @Override
+    public void onKeyBarKey(BarKey key) {
+        sendKey(key.getKeyCode());
+    }
+
+    @Override
+    public void onKeyBarSendText(String text) {
+        if (!grabbedInput) return;
+        pacedInput.sendText(text);
+    }
+
+    @Override
+    public void onKeyBarStopSending() {
+        pacedInput.cancelText();
+    }
+
+    @Override
+    public void onKeyBarShortcut(int codePoint) {
+        sendShortcut(codePoint);
+    }
+
+    private void sendShortcut(int codePoint) {
+        if (!grabbedInput) return;
+        int lower = Character.toLowerCase(codePoint);
+        String russian = "ёйцукенгшщзхъфывапролджэячсмитьбю";
+        String physical = "`qwertyuiop[]asdfghjkl;'zxcvbnm,.";
+        int position = russian.indexOf(lower);
+        if (position >= 0) lower = physical.charAt(position);
+        KeyEvent[] events = lower <= Character.MAX_VALUE
+                ? KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(new char[]{(char) lower}) : null;
+        if (events != null) {
+            for (KeyEvent event : events) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN && !KeyEvent.isModifierKey(event.getKeyCode())) {
+                    sendKey(event.getKeyCode());
+                    return;
+                }
+            }
+        }
+        keyBar.consumeOneShot();
+    }
+
+    private void sendKey(int androidKeyCode) {
+        if (!grabbedInput) return;
+        short translated = keyboardTranslator.translate(androidKeyCode, -1);
+        byte modifiers = getModifierState();
+        pacedInput.post(() -> {
+            conn.sendKeyboardInput(translated, KeyboardPacket.KEY_DOWN, modifiers, (byte)0);
+            conn.sendKeyboardInput(translated, KeyboardPacket.KEY_UP, modifiers, (byte)0);
+        });
+        keyBar.consumeOneShot();
+    }
+
+    @Override
+    public void onKeyBarModifier(BarKey key, boolean down) {
+        byte modifiers = getModifierState();
+        short translated = keyboardTranslator.translate(key.getKeyCode(), -1);
+        pacedInput.post(() -> conn.sendKeyboardInput(translated,
+                down ? KeyboardPacket.KEY_DOWN : KeyboardPacket.KEY_UP, modifiers, (byte)0));
+    }
+
+    @Override
+    public void onKeyBarSmartTypingChanged(boolean enabled) {
+        getSharedPreferences(KEY_BAR_PREFS, 0).edit().putBoolean(KEY_BAR_SMART_TYPING, enabled).apply();
+        if (enabled) {
+            openComposer();
+        } else {
+            leaveComposer();
+        }
     }
 
     // The new layout lands as the keyboard starts moving. This offsets the picture back to where
@@ -609,6 +769,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         @Override
         public void onPrepare(WindowInsetsAnimation animation) {
             if (isKeyboard(animation)) {
+                keyboardMoving = true;
                 startCenterY = visualCenterY();
             }
         }
@@ -628,6 +789,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             for (WindowInsetsAnimation animation : runningAnimations) {
                 if (isKeyboard(animation)) {
                     streamZoom.setKeyboardOffset(travel * (1 - animation.getInterpolatedFraction()));
+                    placeKeyBar(insets.getInsets(WindowInsets.Type.ime()).bottom);
                 }
             }
             return insets;
@@ -636,6 +798,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         @Override
         public void onEnd(WindowInsetsAnimation animation) {
             if (isKeyboard(animation)) {
+                keyboardMoving = false;
+                placeKeyBar(keyboardHeight);
                 streamZoom.setKeyboardOffset(0);
             }
         }
@@ -1424,8 +1588,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         return modifier;
     }
 
+    // The key bar's latches stay out of modifierFlags: those decide the client-side
+    // Ctrl+Alt+Shift combos, which are for physical keyboards.
     private byte getModifierState() {
-        return (byte) modifierFlags;
+        return (byte) (modifierFlags | keyBar.getModifierMask());
     }
 
     // A key code means a physical key on the host, and what that key types depends on the host's
@@ -1439,7 +1605,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
 
         // Shortcuts need the real key
-        if (event.isCtrlPressed() || event.isAltPressed() || event.isMetaPressed()) {
+        if (event.isCtrlPressed() || event.isAltPressed() || event.isMetaPressed() || keyBar.isShortcutHeld()) {
             return false;
         }
 
@@ -1502,6 +1668,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
             if (isSoftKeyboardSymbol(event)) {
                 conn.sendUtf8Text(""+(char)event.getUnicodeChar());
+                keyBar.consumeOneShot();
                 return true;
             }
 
@@ -1517,6 +1684,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 int unicodeChar = event.getUnicodeChar();
                 if ((unicodeChar & KeyCharacterMap.COMBINING_ACCENT) == 0 && (unicodeChar & KeyCharacterMap.COMBINING_ACCENT_MASK) != 0) {
                     conn.sendUtf8Text(""+(char)unicodeChar);
+                    keyBar.consumeOneShot();
                     return true;
                 }
 
@@ -1599,6 +1767,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
             conn.sendKeyboardInput(translated, KeyboardPacket.KEY_UP, getModifierState(event),
                     keyboardTranslator.hasNormalizedMapping(event.getKeyCode(), event.getDeviceId()) ? 0 : MoonBridge.SS_KBE_FLAG_NON_NORMALIZED);
+            keyBar.consumeOneShot();
         }
 
         return true;
@@ -1622,7 +1791,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             return false;
         }
 
-        conn.sendUtf8Text(event.getCharacters());
+        String text = event.getCharacters();
+        if (keyBar.isShortcutHeld() && text.codePointCount(0, text.length()) == 1) {
+            sendShortcut(text.codePointAt(0));
+        } else {
+            conn.sendUtf8Text(text);
+            keyBar.consumeOneShot();
+        }
         return true;
     }
 
@@ -1639,6 +1814,15 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     @Override
     public void toggleKeyboard() {
         LimeLog.info("Toggling keyboard overlay");
+        if (keyBar.getComposerOpen()) {
+            streamView.getWindowInsetsController().hide(WindowInsets.Type.ime());
+            leaveComposer();
+            return;
+        }
+        if (keyBar.getSmartTyping()) {
+            openComposer();
+            return;
+        }
         InputMethodManager inputManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         inputManager.toggleSoftInput(0, 0);
     }
@@ -2388,6 +2572,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     private void stopConnection() {
+        if (pacedInput != null) pacedInput.stop();
         if (connecting || connected) {
             connecting = connected = false;
             updatePipAutoEnter();

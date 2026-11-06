@@ -50,4 +50,14 @@
         android:preferKeepClear="true"
         android:visibility="gone" />
 
+    <!-- Takes focus from the stream only while the text field is open, see Game.openComposer -->
+    <androidx.compose.ui.platform.ComposeView
+        android:id="@+id/keyBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@color/home_background"
+        android:descendantFocusability="blocksDescendants"
+        android:visibility="invisible" />
+
 </merge>
