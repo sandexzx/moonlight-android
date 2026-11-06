@@ -6,7 +6,7 @@ import android.view.View;
 
 import com.limelight.nvstream.NvConnection;
 import com.limelight.nvstream.input.MouseButtonPacket;
-import com.limelight.preferences.PreferenceConfiguration;
+import com.limelight.ui.StreamCursor;
 
 public class RelativeTouchContext implements TouchContext {
     private int lastTouchX = 0;
@@ -28,7 +28,7 @@ public class RelativeTouchContext implements TouchContext {
     private final int referenceWidth;
     private final int referenceHeight;
     private final View targetView;
-    private final PreferenceConfiguration prefConfig;
+    private final StreamCursor cursor;
     private final Handler handler;
 
     private final Runnable dragTimerRunnable = new Runnable() {
@@ -91,16 +91,19 @@ public class RelativeTouchContext implements TouchContext {
 
     private static final int SCROLL_SPEED_FACTOR = 5;
 
+    /**
+     * @param cursor takes single-finger moves in remote desktop mouse mode, null otherwise
+     */
     public RelativeTouchContext(NvConnection conn, int actionIndex,
                                 int referenceWidth, int referenceHeight,
-                                View view, PreferenceConfiguration prefConfig)
+                                View view, StreamCursor cursor)
     {
         this.conn = conn;
         this.actionIndex = actionIndex;
         this.referenceWidth = referenceWidth;
         this.referenceHeight = referenceHeight;
         this.targetView = view;
-        this.prefConfig = prefConfig;
+        this.cursor = cursor;
         this.handler = new Handler(Looper.getMainLooper());
     }
 
@@ -148,9 +151,10 @@ public class RelativeTouchContext implements TouchContext {
     @Override
     public boolean touchDownEvent(int eventX, int eventY, long eventTime, boolean isNewFinger)
     {
-        // Get the view dimensions to scale inputs on this touch
-        xFactor = referenceWidth / (double)targetView.getWidth();
-        yFactor = referenceHeight / (double)targetView.getHeight();
+        // Get the view dimensions to scale inputs on this touch. Touches are measured on the
+        // screen, so a zoomed picture counts at the size it is shown.
+        xFactor = referenceWidth / (targetView.getWidth() * (double)targetView.getScaleX());
+        yFactor = referenceHeight / (targetView.getHeight() * (double)targetView.getScaleY());
 
         originalTouchX = lastTouchX = eventX;
         originalTouchY = lastTouchY = eventY;
@@ -250,7 +254,12 @@ public class RelativeTouchContext implements TouchContext {
             checkForConfirmedScroll();
 
             // We only send moves and drags for the primary touch point
-            if (actionIndex == 0) {
+            if (actionIndex == 0 && cursor != null && pointerCount != 2) {
+                cursor.moveOnScreen(eventX - lastTouchX, eventY - lastTouchY);
+                lastTouchX = eventX;
+                lastTouchY = eventY;
+            }
+            else if (actionIndex == 0) {
                 int deltaX = eventX - lastTouchX;
                 int deltaY = eventY - lastTouchY;
 
@@ -271,16 +280,7 @@ public class RelativeTouchContext implements TouchContext {
                         conn.sendMouseHighResScroll((short)(deltaY * SCROLL_SPEED_FACTOR));
                     }
                 } else {
-                    if (prefConfig.absoluteMouseMode) {
-                        conn.sendMouseMoveAsMousePosition(
-                                (short) deltaX,
-                                (short) deltaY,
-                                (short) targetView.getWidth(),
-                                (short) targetView.getHeight());
-                    }
-                    else {
-                        conn.sendMouseMove((short) deltaX, (short) deltaY);
-                    }
+                    conn.sendMouseMove((short) deltaX, (short) deltaY);
                 }
 
                 // If the scaling factor ended up rounding deltas to zero, wait until they are

@@ -31,6 +31,7 @@ import com.limelight.nvstream.jni.MoonBridge;
 import com.limelight.preferences.GlPreferences;
 import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.ui.GameGestures;
+import com.limelight.ui.StreamCursor;
 import com.limelight.ui.StreamView;
 import com.limelight.ui.StreamZoom;
 import com.limelight.ui.stream.BarKey;
@@ -557,6 +558,9 @@ public class Game extends ComponentActivity implements SurfaceHolder.Callback,
         InputManager inputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);
         inputManager.registerInputDeviceListener(keyboardTranslator, null);
 
+        StreamCursor trackpadCursor = prefConfig.absoluteMouseMode ?
+                new StreamCursor(conn, streamView, streamZoom, prefConfig.width, prefConfig.height) : null;
+
         // Initialize touch contexts
         for (int i = 0; i < touchContextMap.length; i++) {
             if (!prefConfig.touchscreenTrackpad) {
@@ -565,7 +569,7 @@ public class Game extends ComponentActivity implements SurfaceHolder.Callback,
             else {
                 touchContextMap[i] = new RelativeTouchContext(conn, i,
                         REFERENCE_HORIZ_RES, REFERENCE_VERT_RES,
-                        streamView, prefConfig);
+                        streamView, trackpadCursor);
             }
         }
 
@@ -2552,7 +2556,19 @@ public class Game extends ComponentActivity implements SurfaceHolder.Callback,
             view.requestUnbufferedDispatch(event);
         }
 
-        return handleMotionEvent(view, event);
+        if (!prefConfig.touchscreenTrackpad || !event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN) ||
+                event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) {
+            return handleMotionEvent(view, event);
+        }
+
+        // Android reports touches relative to the zoomed picture, so a camera gliding under a
+        // resting finger would look like the finger moving. A trackpad is measured on the screen.
+        MotionEvent onScreen = MotionEvent.obtain(event);
+        onScreen.transform(view.getMatrix());
+        onScreen.offsetLocation(view.getLeft(), view.getTop());
+        boolean handled = handleMotionEvent(view, onScreen);
+        onScreen.recycle();
+        return handled;
     }
 
     @Override
