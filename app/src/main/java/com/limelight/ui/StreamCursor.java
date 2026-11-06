@@ -25,15 +25,12 @@ public class StreamCursor {
         this.zoom = zoom;
         this.width = (short)width;
         this.height = (short)height;
+
+        zoom.followCursor(x, y);
     }
 
     /** Moves the cursor by a distance on the phone's screen, so it keeps pace with the finger at any zoom. */
     public void moveOnScreen(int deltaX, int deltaY) {
-        if (zoom.takeCursorPull()) {
-            x = zoom.pullIntoViewX(x);
-            y = zoom.pullIntoViewY(y);
-        }
-
         x = clamp(x + deltaX / (stream.getWidth() * (double)stream.getScaleX()));
         y = clamp(y + deltaY / (stream.getHeight() * (double)stream.getScaleY()));
 

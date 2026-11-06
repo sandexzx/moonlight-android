@@ -11,6 +11,9 @@ import android.view.View;
  * Two fingers also scroll the PC, so a gesture counts as a pinch only once the fingers move apart
  * or together. Fingers moving in parallel are left alone.
  *
+ * A pinch scales around the PC's cursor, wherever the fingers are. When the host owns the cursor
+ * and its position is unknown here, it scales around the fingers instead.
+ *
  * While zoomed, the camera follows the cursor: it stays still while the cursor is in the middle of
  * the view and glides once the cursor comes near an edge.
  */
@@ -64,8 +67,10 @@ public class StreamZoom {
     private boolean following;
     private long lastFrameNanos;
 
-    // Set after a pinch, which can leave the cursor behind on purpose
-    private boolean pullCursorIn;
+    // Shares of the picture
+    private boolean cursorKnown;
+    private double cursorX;
+    private double cursorY;
 
     public StreamZoom(View stream, View window) {
         this.stream = stream;
@@ -162,15 +167,22 @@ public class StreamZoom {
         lastFocusY = focusY;
     }
 
-    // The point of the picture under the fingers stays under them, so moving both pans too
     private void zoom(float ratio, float focusX, float focusY) {
         float newScale = Math.max(1f, Math.min(scale * ratio, MAX_SCALE));
-        float applied = newScale / scale;
 
-        float visualLeft = stream.getLeft() + offsetX;
-        float visualTop = stream.getTop() + offsetY;
-        offsetX = focusX - (lastFocusX - visualLeft) * applied - stream.getLeft();
-        offsetY = focusY - (lastFocusY - visualTop) * applied - stream.getTop();
+        if (cursorKnown) {
+            // The point of the picture under the cursor stays where it is on the screen
+            offsetX += (float)cursorX * stream.getWidth() * (scale - newScale);
+            offsetY += (float)cursorY * stream.getHeight() * (scale - newScale);
+        }
+        else {
+            // The point of the picture under the fingers stays under them, so moving both pans too
+            float applied = newScale / scale;
+            float visualLeft = stream.getLeft() + offsetX;
+            float visualTop = stream.getTop() + offsetY;
+            offsetX = focusX - (lastFocusX - visualLeft) * applied - stream.getLeft();
+            offsetY = focusY - (lastFocusY - visualTop) * applied - stream.getTop();
+        }
 
         scale = newScale;
         apply();
@@ -181,11 +193,14 @@ public class StreamZoom {
             scale = 1f;
             apply();
         }
-        pullCursorIn = scale > 1f;
     }
 
     /** Takes the cursor's new position, as shares of the picture. */
     public void followCursor(double cursorX, double cursorY) {
+        cursorKnown = true;
+        this.cursorX = cursorX;
+        this.cursorY = cursorY;
+
         if (scale == 1f || pinching) {
             return;
         }
@@ -244,35 +259,6 @@ public class StreamZoom {
     private void stopFollowing() {
         following = false;
         Choreographer.getInstance().removeFrameCallback(followFrame);
-    }
-
-    /** @return true once after a pinch: the next cursor move should bring the cursor into view */
-    public boolean takeCursorPull() {
-        boolean pull = pullCursorIn;
-        pullCursorIn = false;
-        return pull;
-    }
-
-    public double pullIntoViewX(double cursorX) {
-        return pullIntoView(stream.getLeft() + offsetX, stream.getWidth() * scale,
-                window.getWidth(), cursorX);
-    }
-
-    public double pullIntoViewY(double cursorY) {
-        return pullIntoView(stream.getTop() + offsetY, stream.getHeight() * scale,
-                visibleHeight(), cursorY);
-    }
-
-    // An off-screen cursor comes to rest just inside the margin, so it doesn't push the camera yet
-    private double pullIntoView(float pictureStart, float pictureSize, int viewport, double cursor) {
-        double onScreen = pictureStart + cursor * pictureSize;
-        if (onScreen >= 0 && onScreen <= viewport) {
-            return cursor;
-        }
-
-        float margin = viewport * FOLLOW_MARGIN;
-        double edge = onScreen < 0 ? margin : viewport - margin;
-        return Math.max(0.0, Math.min((edge - pictureStart) / pictureSize, 1.0));
     }
 
     private int visibleHeight() {
